@@ -1,3 +1,5 @@
 .venv
 __pycache__/
 * .pyc
+posts.json
+users.json
