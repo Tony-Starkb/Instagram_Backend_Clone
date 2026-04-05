@@ -21,18 +21,18 @@ class PostNotFound(HTTPException):
 
 class UserNotFound(HTTPException):
     """Exception raised when a user is not found."""
-    def __init__(self, user_id):
-        detail = f"User with id {user_id} not found."
+    def __init__(self, username):
+        detail = f"User with username {username} not found."
         super().__init__(status_code=404, detail=detail)
-        self.user_id = user_id
+        self.username = username
 
 class NotAuthorized(HTTPException):
     """Exception raised when a user is not authorized to perform an action."""
-    def __init__(self, user_id=None):
-        if user_id:
-            detail = f"User with id {user_id} is not authorized."
+    def __init__(self, username=None):
+        if username:
+            detail = f"User with username {username} is not authorized."
         else:
             detail = "Not authorized to perform this action."
         super().__init__(status_code=403, detail=detail)
-        self.user_id = user_id
+        self.username = username
 

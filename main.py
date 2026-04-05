@@ -1,13 +1,21 @@
 import uuid
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from routers.posts import router as post_router
+from routers.posts import posts_router as post_router
+from routers.users import users_router as user_router
 from fastapi.exceptions import HTTPException, RequestValidationError
 from core.exceptions import PostNotFound, UserNotFound, NotAuthorized
 
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def update_header(request: Request, call_next):
+    request.state.request_id = str(uuid.uuid4())
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
 
 
 @app.get("/health")
@@ -30,9 +38,8 @@ def version_info():
 	)
 
 
-app.include_router(post_router, prefix = "/api/v1")
-
-
+app.include_router(post_router)
+app.include_router(user_router)
 
 @app.exception_handler(PostNotFound)
 def post_not_found_handler(request: Request, exc: PostNotFound):
@@ -42,7 +49,7 @@ def post_not_found_handler(request: Request, exc: PostNotFound):
 			"error": {
 				"code": exc.status_code,
 				"message": exc.detail,
-				"request_id": str(uuid.uuid4())
+				"request_id": request.state.request_id
 			}
 		}
 	)
@@ -55,7 +62,7 @@ def user_not_found_handler(request: Request, exc: UserNotFound):
 			"error": {
 				"code": exc.status_code,
 				"message": exc.detail,
-    			"request_id": str(uuid.uuid4())
+    			"request_id": request.state.request_id
 			}
 		}
 	)		
@@ -68,7 +75,7 @@ def not_authorized_handler(request: Request, exc: NotAuthorized):
             "error": {
                 "code": exc.status_code,
                 "message": exc.detail,
-                "request_id": str(uuid.uuid4())
+                "request_id": request.state.request_id
             }
         }
     )
@@ -81,7 +88,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
             "error": {
                 "code": 500,
                 "message": "Internal server error",
-                "request_id": str(uuid.uuid4())
+                "request_id": request.state.request_id
             }
         }
     )
@@ -94,7 +101,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 			"error": {
 				"code": 422,
 				"message": "Validation error",
-				"request_id": str(uuid.uuid4())
+				"request_id": request.state.request_id
 			}
 		}
 	)
@@ -107,7 +114,7 @@ def http_exception_handler(request: Request, exc: HTTPException):
 			"error": {
 				"code": exc.status_code,
 				"message": exc.detail,
-				"request_id": str(uuid.uuid4())
+				"request_id": request.state.request_id
 			}
 		}
 	)

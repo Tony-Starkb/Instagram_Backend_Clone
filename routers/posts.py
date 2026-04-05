@@ -1,61 +1,45 @@
 from fastapi import APIRouter, status, Request
 from fastapi.responses import JSONResponse
-import uuid
 from services import db_handler
 from database.posts_model import Posts
 from core.exceptions import PostNotFound
 
 
-router = APIRouter()
+posts_router = APIRouter(prefix = "/api/v1/posts")
 
 
-# to fetch all the posts available in database
-@router.get("/posts", status_code = status.HTTP_200_OK)
-def get_post(request: Request):
-
-	print(dict(request.headers))
-	#return db_handler.get_all_posts()
-
-
-	response = JSONResponse(
-			db_handler.get_all_posts()
-		)
-	response.headers["X-Request-ID"] = str(uuid.uuid4())
-	return response
-
-
-@router.get("/posts/{id}", status_code = status.HTTP_200_OK)
+@posts_router.get("/{id}", status_code = status.HTTP_200_OK)
 def get_post_by_id(id: int, request: Request):
 	
 	print(dict(request.headers))
-	#return db_handler.get_post_by_id(id)
+	db_post = db_handler.get_post_by_id(id)
+	if db_post is None:
+		raise PostNotFound(id)
 
 	response = JSONResponse(
-			db_handler.get_post_by_id(id)
+			db_post
 		)
-	response.headers["X-Request-ID"] = str(uuid.uuid4())
-	if response.body == b'null':
-		raise PostNotFound(id)
+
 	return response
 
 
 
-@router.post("/posts", status_code = status.HTTP_201_CREATED)
+@posts_router.post("/", status_code = status.HTTP_201_CREATED)
 def create_post(request: Request, post: Posts):
 
 	print(dict(request.headers))
-	db_handler.add_post(post)
+	db_handler.add_post(post.model_dump())
 
 	response = JSONResponse(
 			{"message": "post created"}
 		)
 
-	response.headers["X-Request-ID"] = str(uuid.uuid4())
+	
 	return response
 
 
 
-@router.delete("/posts/{id}", status_code = status.HTTP_204_NO_CONTENT)
+@posts_router.delete("/{id}", status_code = status.HTTP_204_NO_CONTENT)
 def delete_post(id: int, request: Request):
 	
 	print(dict(request.headers))
@@ -63,7 +47,7 @@ def delete_post(id: int, request: Request):
 	return None
 
 
-@router.patch("/posts/{id}", status_code = status.HTTP_200_OK)
+@posts_router.patch("/{id}", status_code = status.HTTP_200_OK)
 def update_specific_part_of_post(id: int, request: Request):
 	
 	print(dict(request.headers))
@@ -72,5 +56,21 @@ def update_specific_part_of_post(id: int, request: Request):
 			{"message": "updated successfully"}
 		)
 
-	response.headers["X-Request-ID"] = str(uuid.uuid4())
+	
 	return response
+
+
+@posts_router.post("/{id}/like", status_code = status.HTTP_200_OK)
+def like_post(id: int, request: Request):
+    print(dict(request.headers))
+
+    response = JSONResponse(
+            {"message": "post liked"}
+    )
+    return response
+	
+
+@posts_router.delete("/{id}/like", status_code = status.HTTP_204_NO_CONTENT)
+def unlike_post(id: int, request: Request):
+	print(dict(request.headers))
+
