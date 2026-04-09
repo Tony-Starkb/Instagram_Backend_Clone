@@ -152,3 +152,180 @@ app/
 ---
 
 *Built as part of a structured backend learning path — Month 1, Day 3.*
+
+
+# Day 5 — Request Lifecycle + Middleware
+### Instagram Clone | Month 1 Backend Skills
+
+---
+
+## What Was Built Today
+
+### Project Structure
+```
+app/
+├── middleware/
+│   ├── __init__.py
+│   ├── request_id.py       ← generates unique ID for every request
+│   └── logging.py          ← logs every request with timing
+├── dependencies/
+│   └── auth.py             ← get_current_user() stub
+└── main.py                 ← registers middleware + exception handlers
+```
+
+---
+
+## Middleware 1 — `middleware/request_id.py`
+
+Generates a unique `X-Request-ID` for every incoming request and attaches it to the response header.
+
+**Key behaviour:**
+- If the incoming request already has an `X-Request-ID` (e.g. from CDN or API Gateway), it reuses that ID — preserving the trace chain
+- If no ID exists, it generates a new `uuid4()`
+- Stores the ID in `request.state.request_id` so all other middleware and route handlers can access it
+
+**Why this matters at Instagram scale:**
+Every request that flows through CDN → API Gateway → Auth → your server needs a single traceable ID. Without it, engineers cannot find a specific failed request among billions of daily logs.
+
+---
+
+## Middleware 2 — `middleware/logging.py`
+
+Logs every request with method, path, status code, and duration.
+
+**Log format:**
+```
+2026-04-09 09:39:58 | INFO | req_id=a71807de-7ca6-4ef7-8a09-91f7d69e4569 | GET /api/v1/posts | 200 | 45ms
+```
+
+**Key behaviour:**
+- Timer starts **before** `call_next` — captures full request duration
+- Timer stops **after** `call_next` — status code and duration now available
+- Reads `request_id` safely using `getattr(request.state, 'request_id', 'unknown')` — won't crash even if request_id middleware didn't run
+- Logs to `app.log` file
+
+**Why `perf_counter()` over `time.time()`:**
+`perf_counter()` is a high-resolution timer designed for measuring short durations. `time.time()` can drift or have low resolution depending on the OS — not suitable for measuring millisecond-level endpoint performance.
+
+---
+
+## Middleware Registration Order — `main.py`
+
+FastAPI executes middleware in **reverse registration order**. So to run `request_id` first and `logging` second:
+
+```python
+# Register logging first (runs second)
+app.middleware("http")(log_request)
+
+# Register request_id second (runs first)
+app.middleware("http")(add_request_id_to_header)
+```
+
+**Execution flow:**
+```
+Incoming Request
+      ↓
+add_request_id_to_header   ← assigns request_id
+      ↓
+log_request                ← reads request_id, starts timer
+      ↓
+Route Handler
+      ↓
+log_request                ← stops timer, logs everything
+      ↓
+add_request_id_to_header   ← attaches X-Request-ID to response header
+      ↓
+Outgoing Response
+```
+
+---
+
+## Dependency Stub — `dependencies/auth.py`
+
+A placeholder `get_current_user()` function using FastAPI's `Depends()` system.
+
+**Returns a dummy user for now:**
+```python
+{
+    "user_id": "test_user_id",
+    "username": "test_user"
+}
+```
+
+Returns a plain dictionary — not a `JSONResponse`. The route handler is responsible for building the response, not the dependency function.
+
+**Will be replaced later** with real JWT token validation and database lookup.
+
+---
+
+## Exception Handling — `main.py`
+
+All exception handlers include `request_id` in the error response so clients can report it and engineers can trace it in logs.
+
+**Helper function to avoid repetition:**
+```python
+def get_request_id(request):
+    return getattr(request.state, 'request_id', 'unknown')
+```
+
+**Handled exceptions:**
+| Exception | Status Code |
+|-----------|-------------|
+| `PostNotFound` | 404 |
+| `UserNotFound` | 404 |
+| `NotAuthorized` | 401/403 |
+| `HTTPException` | varies |
+| `RequestValidationError` | 422 |
+| `Exception` (generic) | 500 |
+
+---
+
+## Key Concepts Learned
+
+**Middleware execution flow:**
+```
+Request → [Middleware] → Route Handler → [Middleware] → Response
+```
+
+**Instagram's real middleware stack at API Gateway:**
+1. TLS termination
+2. DDoS protection
+3. Auth token validation
+4. Rate limiting
+5. Request routing
+
+Today's middleware simulates layers 4 and 5 at a small scale.
+
+**Why `@app.middleware("http")` over `BaseHTTPMiddleware`:**
+`BaseHTTPMiddleware` has known performance issues under load and does not work well with background tasks. The `@app.middleware("http")` decorator is preferred in production FastAPI applications.
+
+**P50 / P95 / P99 latency:**
+Instagram tracks what percentage of requests complete within a given time. If P99 for an endpoint is too high, engineers investigate and optimize that specific endpoint.
+
+**Correlation IDs:**
+Every request gets a unique ID that appears in every log line. When a user reports a problem, engineers search logs by that ID and trace the exact failure point across all microservices instantly.
+
+---
+
+## Logging Configuration
+
+Configured in `main.py` — not inside individual middleware files:
+
+```python
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    filename="app.log"
+)
+```
+
+---
+
+## Day Deliverable
+
+Every request is now:
+- Assigned a unique `X-Request-ID`
+- Logged with method, path, status code, and duration
+- Traceable across the entire application via `request.state.request_id`
+- Included in every error response for client-side reporting
