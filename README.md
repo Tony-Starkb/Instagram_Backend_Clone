@@ -153,13 +153,11 @@ app/
 
 *Built as part of a structured backend learning path — Month 1, Day 3.*
 
-
-# Day 5 — Request Lifecycle + Middleware
-### Instagram Clone | Month 1 Backend Skills
-
 ---
 
-## What Was Built Today
+## Day 5 — Request Lifecycle + Middleware
+
+### What Was Built Today
 
 ### Project Structure
 ```
@@ -175,7 +173,7 @@ app/
 
 ---
 
-## Middleware 1 — `middleware/request_id.py`
+### Middleware 1 — `middleware/request_id.py`
 
 Generates a unique `X-Request-ID` for every incoming request and attaches it to the response header.
 
@@ -189,7 +187,7 @@ Every request that flows through CDN → API Gateway → Auth → your server ne
 
 ---
 
-## Middleware 2 — `middleware/logging.py`
+### Middleware 2 — `middleware/logging.py`
 
 Logs every request with method, path, status code, and duration.
 
@@ -209,7 +207,7 @@ Logs every request with method, path, status code, and duration.
 
 ---
 
-## Middleware Registration Order — `main.py`
+### Middleware Registration Order — `main.py`
 
 FastAPI executes middleware in **reverse registration order**. So to run `request_id` first and `logging` second:
 
@@ -240,7 +238,7 @@ Outgoing Response
 
 ---
 
-## Dependency Stub — `dependencies/auth.py`
+### Dependency Stub — `dependencies/auth.py`
 
 A placeholder `get_current_user()` function using FastAPI's `Depends()` system.
 
@@ -258,7 +256,7 @@ Returns a plain dictionary — not a `JSONResponse`. The route handler is respon
 
 ---
 
-## Exception Handling — `main.py`
+### Exception Handling — `main.py`
 
 All exception handlers include `request_id` in the error response so clients can report it and engineers can trace it in logs.
 
@@ -280,7 +278,7 @@ def get_request_id(request):
 
 ---
 
-## Key Concepts Learned
+### Key Concepts Learned
 
 **Middleware execution flow:**
 ```
@@ -307,7 +305,7 @@ Every request gets a unique ID that appears in every log line. When a user repor
 
 ---
 
-## Logging Configuration
+### Logging Configuration
 
 Configured in `main.py` — not inside individual middleware files:
 
@@ -322,10 +320,189 @@ logging.basicConfig(
 
 ---
 
-## Day Deliverable
+### Day Deliverable
 
 Every request is now:
 - Assigned a unique `X-Request-ID`
 - Logged with method, path, status code, and duration
 - Traceable across the entire application via `request.state.request_id`
 - Included in every error response for client-side reporting
+
+---
+
+*Built as part of a structured backend learning path — Month 1, Day 5.*
+
+---
+
+## Day 6 — Instagram Data Model (Design Before You Code)
+
+No code today. This day was entirely focused on database design — thinking through entities, relationships, constraints, and indexes before writing a single line of Python.
+
+---
+
+### What I Learned
+
+**Entity design** — breaking Instagram's core features down into 5 tables: Users, Posts, Follows, Likes, Comments.
+
+**Relationship thinking** — asking "can one row on the left have many matching rows on the right?" in both directions to derive every relationship:
+- Users → Posts: one-to-many (one user, many posts)
+- Users → Follows → Users: many-to-many self-referential (a user follows many, is followed by many)
+- Users → Likes → Posts: many-to-many join table
+- Users → Comments → Posts: many-to-many with extra data (content field)
+
+**Constraint thinking** — understanding why constraints live in the database, not just in application code. Even if API validation fails, the DB rejects bad data.
+
+**Index thinking** — indexes are only useful on columns that appear in WHERE clauses of frequent queries. Adding indexes everywhere slows down writes for no benefit.
+
+**Denormalization** — `like_count` and `comment_count` are stored directly on the posts table instead of being computed with `COUNT()` on every read. This is how Instagram handles billions of reads efficiently.
+
+**Soft deletes** — posts are never truly deleted. `status` is set to `archived` or `deleted` so data can be restored and referential integrity is preserved.
+
+---
+
+### Data Model
+
+#### ERD Diagram
+
+![ERD Diagram](./erd-diagram.png)
+
+---
+
+#### Schema
+
+```dbml
+enum post_status {
+  active
+  archived
+  deleted
+}
+
+Table users {
+  id uuid [primary key]
+  email varchar [unique]
+  username varchar(30) [unique]
+  password_hash varchar
+  full_name varchar
+  bio varchar(150)
+  avatar_url varchar(3000)
+  is_private bool
+  is_verified bool
+  created_at timestamp
+
+  indexes {
+    email [name: 'idx_users_email']
+    username [name: 'idx_users_username']
+  }
+}
+
+Table posts {
+  id uuid [primary key]
+  caption varchar(2200)
+  image_url varchar(3000)
+  user_id uuid [not null]
+  status post_status
+  like_count integer
+  comment_count integer
+  created_at timestamp
+
+  indexes {
+    user_id [name: 'idx_posts_user_id']
+  }
+}
+
+Table follows {
+  following_user_id uuid [not null]
+  followed_user_id uuid [not null]
+  created_at timestamp
+
+  indexes {
+    (following_user_id, followed_user_id) [pk]
+  }
+}
+
+Table likes {
+  user_id uuid [not null]
+  post_id uuid [not null]
+  created_at timestamp
+
+  indexes {
+    (user_id, post_id) [pk]
+  }
+}
+
+Table comments {
+  id uuid [primary key]
+  user_id uuid [not null]
+  post_id uuid [not null]
+  content varchar
+  created_at timestamp
+}
+```
+
+---
+
+### 5 Key Queries
+
+#### 1. Login Lookup
+```sql
+-- find a user by their email
+-- uses index: idx_users_email
+SELECT * FROM users
+WHERE email = 'email that we pass';
+```
+
+#### 2. Get User Profile
+```sql
+-- fetch a user's details by username
+-- uses index: idx_users_username
+SELECT * FROM users
+WHERE username = 'required username';
+```
+
+#### 3. Get User's Posts
+```sql
+-- fetch all posts by a specific user
+-- uses index: idx_posts_user_id
+SELECT * FROM posts
+WHERE user_id = (SELECT id FROM users WHERE username = 'required username');
+```
+
+#### 4. Get Feed
+```sql
+-- fetch posts from everyone a user follows, newest first
+SELECT * FROM posts
+WHERE user_id IN (
+    SELECT followed_user_id FROM follows
+    WHERE following_user_id = 'my user id'
+)
+ORDER BY created_at DESC;
+```
+
+#### 5. Check if Already Liked
+```sql
+-- check if a user has already liked a specific post
+-- returns a row if liked, empty if not
+SELECT * FROM likes
+WHERE user_id = 'my user id'
+AND post_id = 'the post id';
+```
+
+---
+
+### Key Takeaways
+
+- Design the database before writing any code — mistakes here are expensive to fix later
+- Composite primary keys work only when the combination is guaranteed to never repeat
+- `SELECT *` works for learning but never use it in production — you risk exposing `password_hash` to the frontend
+- The `follows` table is self-referential — both foreign keys point back to the same `users` table
+- Comments need their own `id` because the same user can comment multiple times on the same post — unlike likes where `(user_id, post_id)` is always unique
+
+---
+
+### Deliverable
+
+`docs/data-model.md` — full ER diagram with all entities, fields, types, constraints, indexes, and 5 key queries documented.
+
+---
+
+*Built as part of a structured backend learning path — Month 1, Day 6.*
