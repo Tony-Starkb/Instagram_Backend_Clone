@@ -4,8 +4,8 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-USERS_FILE = BASE_DIR / "database" / "users.json"
-POSTS_FILE = BASE_DIR / "database" / "posts.json"
+USERS_FILE = BASE_DIR / "schemas" / "users.json"
+POSTS_FILE = BASE_DIR / "schemas" / "posts.json"
 
 
 def read_json(file_path):
@@ -37,6 +37,14 @@ def get_user_by_username(username):
 	users = read_json(USERS_FILE)
 	for user in users:
 		if user["username"] == username:
+			return user
+	return None
+
+
+def get_user_by_email(email):
+	users = read_json(USERS_FILE)
+	for user in users:
+		if user["email"] == email:
 			return user
 	return None
 	

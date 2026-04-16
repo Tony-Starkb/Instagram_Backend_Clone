@@ -1,11 +1,11 @@
 from fastapi import APIRouter, status, Request
 from fastapi.responses import JSONResponse
 from services import db_handler
-#from database.users_model import Users
+from schemas.user import UserCreate, UserResponse
 from core.exceptions import UserNotFound, PostNotFound
 
 
-users_router = APIRouter(prefix = "/api/v1/users")
+users_router = APIRouter(prefix = "/api/v1/users", tags = ["users"])
 
 
 @users_router.get("/{username}", status_code = status.HTTP_200_OK)
@@ -17,7 +17,7 @@ def get_user_by_username(username: str, request: Request):
         raise UserNotFound(username)
 
     response = JSONResponse(
-        db_user
+        UserResponse(**db_user).model_dump()
     )
     
     return response

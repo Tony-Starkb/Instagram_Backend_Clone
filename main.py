@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from routers.posts import posts_router as post_router
 from routers.users import users_router as user_router
+from routers.auth import auth_router as login_router
 from fastapi.exceptions import HTTPException, RequestValidationError
 from core.exceptions import PostNotFound, UserNotFound, NotAuthorized
 import logging
@@ -15,15 +16,18 @@ logging.basicConfig(
 	format = "%(asctime)s | %(levelname)s | %(message)s",
 	datefmt = "%Y-%m-%d %H:%M:%S",
 	filename = "app.log"
-)
+) 
 
 def get_request_id(request, exc):
+    status_code = getattr(exc, "status_code", 500)
+    message = getattr(exc, "detail", str(exc))
+
     return JSONResponse(
-        status_code=exc.status_code,
+        status_code=status_code,
         content={
             "error": {
-                "code": exc.status_code,
-                "message": exc.detail,
+                "code": status_code,
+                "message": message,
                 "request_id": getattr(request.state, 'request_id', 'unknown')
             }
         }
@@ -60,6 +64,7 @@ def version_info():
 
 app.include_router(post_router)
 app.include_router(user_router)
+app.include_router(login_router)
 
 
 @app.exception_handler(PostNotFound)
