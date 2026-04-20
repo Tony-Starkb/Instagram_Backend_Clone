@@ -5,69 +5,63 @@ and validation, password hashing and verification etc.
 """
  
 
-from fastapi import APIRouter, status, Request
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 from services import db_handler
-from schemas.user import UserCreate, UserResponse
-from core.exceptions import UserNotFound, PostNotFound
+from schemas.user import UserCreate
+from schemas.auth import TokenResponse
 from services.user_input_validation import validate_password, validate_username
 from fastapi.exceptions import HTTPException
-import bcrypt
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
+from fastapi.security import OAuth2PasswordRequestForm
+import os
+from dotenv import load_dotenv
+from services.dependencies import create_token, validate_password_hash, authenticate_user, password_to_hash
+
+
+load_dotenv()
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINS = os.getenv("ACCESS_TOKEN_EXPIRE_MINS")
+REFRESH_TOKEN_EXPIRE_DAYS = os.getenv("REFRESH_TOKEN_EXPIRE_DAYS")
 
 
 auth_router = APIRouter(prefix = "/api/v1/auth", tags = ["auth"])
 
 
-
-def password_to_hash(userpassword: str):
-	salt = bcrypt.gensalt(rounds=12)
-	return bcrypt.hashpw(userpassword.encode('utf-8'), salt).decode('utf-8')
-
-
-def validate_password_hash(userpassword: str, passwordhash: str):
-	return bcrypt.chech(
-		userpassword.encode('utf-8'),
-		passwordhash.encode('utf-8')
-	)
-
-
-
 # first here taking the input from the users (either username/password or email/passwors)
 @auth_router.post("/login")
-def user_login(username: str, password: str):
-	if validate_username(username):
-		raise HTTPException (
-			status_code = 422,
-			detail = "Unprocessable Entity"
-		)
+def user_login(
+    user: Annotated[OAuth2PasswordRequestForm, Depends()],
+    response: Response,
+) -> TokenResponse:
+    user = authenticate_user(user.username, user.password)
+        
+    access_token_expire = timedelta(minutes=int(ACCESS_TOKEN_EXPIRE_MINS))
+    accessToken = create_token (
+		payload={"username": user['username'], "role": user['role']},
+		expire_time=access_token_expire
+	)
+    
+    refresh_token_expire = timedelta(days=int(REFRESH_TOKEN_EXPIRE_DAYS))
+    refresh_token = create_token(
+		payload={"username":user['username'], "role": user['role']},
+        expire_time=refresh_token_expire
+	)
+    
+    response.set_cookie(
+		key='refresh_token',
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",       
+        max_age=7 * 24 * 60 * 60
+	)
+    
+    return TokenResponse (access_token = accessToken, token_type = "bearer")
 
-	if validate_password(password):
-		raise HTTPException (
-			status_code = 422,
-			detail = "Unprocessable Entity"
-		)
-
-	user = db_handler.get_user_by_username(username)
-
-	if not user:
-		raise HTTPException(
-			status_code = 401,
-			detail = "Something went wrong"
-		)
-	
-	if not validate_password_hash(password, user["password_hash"]):
-		raise HTTPException(
-			status_code = 401,
-			detail = "Something went wrong"
-		)
-	
-
-	return JSONResponse ({
-		"message": "user validated",
-		"user": user
-	})
 
 
 @auth_router.post("/registration")
@@ -119,3 +113,4 @@ def user_registration(user: UserCreate):
 		"message": "Account created successfully",
 		"User Details": f"UserName: {user.username}, EMail: {user.email}"	
 	})
+ 

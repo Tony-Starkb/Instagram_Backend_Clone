@@ -1,6 +1,13 @@
 from pydantic import AnyHttpUrl, BaseModel, EmailStr
+from enum import Enum
 
 
+class Role(str, Enum):
+    USER = "user"
+    MODERATOR = "moderator" 
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+    
 
 class UserCreate(BaseModel):
     
@@ -9,6 +16,7 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
     bio: str
+    role: Role
     
 
 class UserResponse(BaseModel):

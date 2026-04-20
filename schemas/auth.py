@@ -7,10 +7,10 @@ class LoginRequest(BaseModel):
     password: str
     
     
-class TakenResponse(BaseModel):
+class TokenResponse(BaseModel):
     
-    assess_tokef: str
-    refresh_token: str
-    refresh_token: str = "bearer"
+    access_token: str
+    #refresh_token: str
+    token_type: str = "bearer"
     
     
