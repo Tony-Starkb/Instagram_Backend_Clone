@@ -1,8 +1,8 @@
 from fastapi import APIRouter, status, Request
 from fastapi.responses import JSONResponse
 from services import db_handler
-from schemas.user import UserCreate, UserResponse
-from core.exceptions import UserNotFound, PostNotFound
+from schemas.user import UserPublicResponse
+from core.exceptions import UserNotFound
 
 
 users_router = APIRouter(prefix = "/api/v1/users", tags = ["users"])
@@ -10,47 +10,45 @@ users_router = APIRouter(prefix = "/api/v1/users", tags = ["users"])
 
 @users_router.get("/{username}", status_code = status.HTTP_200_OK)
 def get_user_by_username(username: str, request: Request):
-    print(dict(request.headers))
-    
-    db_user = db_handler.get_user_by_username(username)
+    db_user = db_handler.get_public_user(username)
     if db_user is None:
         raise UserNotFound(username)
-
-    response = JSONResponse(
-        UserResponse(**db_user).model_dump()
-    )
-    
-    return response
+    return UserPublicResponse(**db_user).model_dump()
 
 
 
 @users_router.get("/{username}/posts", status_code = status.HTTP_200_OK)
 def get_users_posts(username: str, request: Request):
-    print(dict(request.headers))
-    
     db_user = db_handler.get_user_by_username(username)
     if db_user is None:
         raise UserNotFound(username)
     
     db_user_posts = db_handler.get_user_posts(username)
-    
-    response = JSONResponse(
-        db_user_posts
-    )
-    
-    return response
+    return db_user_posts
     
     
 @users_router.get("/{username}/followers", status_code = status.HTTP_200_OK)
 def get_user_followers(username: str, request: Request):
-    print(dict(request.headers))
+    db_user = db_handler.get_user_by_username(username)
+    if db_user is None:
+        raise UserNotFound(username)
     return JSONResponse(
-        {"message": f"followers of {username}"}
+        {
+            "username": username,
+            "followers": db_user["followers"],
+            "count": len(db_user["followers"]),
+        }
     )
     
 @users_router.get("/{username}/following", status_code = status.HTTP_200_OK)
 def get_user_following(username: str, request: Request):
-    print(dict(request.headers))
+    db_user = db_handler.get_user_by_username(username)
+    if db_user is None:
+        raise UserNotFound(username)
     return JSONResponse(
-        {"message": f"users followed by {username}"}
+        {
+            "username": username,
+            "following": db_user["following"],
+            "count": len(db_user["following"]),
+        }
     )

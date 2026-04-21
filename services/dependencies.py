@@ -23,8 +23,7 @@ class TokenData(BaseModel):
     username: str | None = None
 
 
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 def password_to_hash(userpassword: str):
@@ -40,7 +39,7 @@ def validate_password_hash(userpassword: str, passwordhash: str):
  
  
 def authenticate_user(username: str, password: str):
-    user = db_handler.get_user_by_username(username)
+    user = db_handler.get_user_by_username(username) or db_handler.get_user_by_email(username)
      
     if user is None:
          raise HTTPException (
@@ -76,7 +75,11 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 	except jwt.InvalidTokenError:
 		raise credentials_exception
 
-	return token_data
+	user = db_handler.get_user_by_username(token_data.username)
+	if user is None:
+		raise credentials_exception
+
+	return user
 
 
 # function to create a jwt token based on the payloadwe pass to it

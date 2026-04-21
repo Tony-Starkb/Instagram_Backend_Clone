@@ -17,24 +17,25 @@ from fastapi.exceptions import HTTPException
 
 
 def validate_password(password: str):
+    password = password.strip()
     if len(password) < 8:
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Password must be at least 8 characters long."
         )
     if not any(char.isalpha() for char in password):
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Password must contain at least one letter."
         )
     if not any(char.isdigit() for char in password):
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Password must contain at least one number."
         )
     if not any(char in "!@#$%&*" for char in password):
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Password must contain at least one special character (!, @, #, $, %, &, *)."
         )
 
@@ -51,29 +52,30 @@ The usrname should include these constraunts:
 """
  
 def validate_username(username: str):
+    username = username.strip()
     if len(username) < 5:
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Username must be at least 5 characters long."
         )
     if not all(char.isalnum() or char in "_-$@#" for char in username):
         raise HTTPException (
-            status_code = 400, 
+            status_code = 422,
             detail = "Username can only contain letters, numbers, and special characters (_, -, $, @, #)."
         )
-    if username[0] in "-" or username[-1] in "-":
+    if not username[0].isalnum() or not username[-1].isalnum():
         raise HTTPException (
-            status_code = 400,
-            detail = "Username cannot start or end with special characters (-)."
+            status_code = 422,
+            detail = "Username cannot start or end with special characters."
         )
     if not any (char.isalpha() for char in username):
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Username must contain at least one letter."
         )
     if any (char in "!%^&*()+=|\\:;\"'<>,.?/" for char in username):
         raise HTTPException (
-            status_code = 400,
+            status_code = 422,
             detail = "Username cannot contain special characters other than _, -, $, # and @."
         )
     

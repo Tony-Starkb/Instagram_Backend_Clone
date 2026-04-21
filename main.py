@@ -1,14 +1,15 @@
+import logging
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.responses import JSONResponse
+
+from core.exceptions import PostNotFound, UserNotFound, NotAuthorized
+from middleware.logging import log_request
+from middleware.request_id import add_request_id_to_header
+from routers.auth import auth_router as login_router
 from routers.posts import posts_router as post_router
 from routers.users import users_router as user_router
-from routers.auth import auth_router as login_router
-from fastapi.exceptions import HTTPException, RequestValidationError
-from core.exceptions import PostNotFound, UserNotFound, NotAuthorized
-import logging
-from middleware.request_id import add_request_id_to_header
-from middleware.logging import log_request
 
 
 logging.basicConfig(
@@ -18,19 +19,21 @@ logging.basicConfig(
 	filename = "app.log"
 ) 
 
-def get_request_id(request, exc):
-    status_code = getattr(exc, "status_code", 500)
-    message = getattr(exc, "detail", str(exc))
+logger = logging.getLogger(__name__)
 
+
+def build_error_response(request: Request, status_code: int, message: str):
+    request_id = getattr(request.state, 'request_id', 'unknown')
     return JSONResponse(
         status_code=status_code,
         content={
             "error": {
                 "code": status_code,
                 "message": message,
-                "request_id": getattr(request.state, 'request_id', 'unknown')
+                "request_id": request_id
             }
-        }
+        },
+        headers={"X-Request-ID": request_id},
     )
 
 
@@ -44,11 +47,7 @@ app.middleware("http")(add_request_id_to_header)
 
 @app.get("/health")
 def check_health():
-	return JSONResponse(
-		{
-			"Status": "OK"
-		}
-	)
+	return JSONResponse({"status": "ok"})
 
 
 @app.get("/api/v1")
@@ -69,35 +68,25 @@ app.include_router(login_router)
 
 @app.exception_handler(PostNotFound)
 def post_not_found_handler(request: Request, exc: PostNotFound):
-    response = get_request_id(request, exc)
-    return response
+    return build_error_response(request, exc.status_code, exc.detail)
 
 @app.exception_handler(UserNotFound)
 def user_not_found_handler(request: Request, exc: UserNotFound):
-    response = get_request_id(request, exc)
-    return response
+    return build_error_response(request, exc.status_code, exc.detail)
 
 @app.exception_handler(NotAuthorized)
 def not_authorized_handler(request: Request, exc: NotAuthorized):
-    response = get_request_id(request, exc)
-    return response		
-
-@app.exception_handler(NotAuthorized)
-def not_authorized_handler(request: Request, exc: NotAuthorized):
-    response = get_request_id(request, exc)
-    return response
+    return build_error_response(request, exc.status_code, exc.detail)
     
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    response = get_request_id(request, exc)
-    return response
+    logger.exception("Unhandled exception for request_id=%s", getattr(request.state, "request_id", "unknown"))
+    return build_error_response(request, 500, "Internal server error.")
     
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    response = get_request_id(request, exc)
-    return response
+    return build_error_response(request, 422, "Validation failed.")
       
 @app.exception_handler(HTTPException)
 def http_exception_handler(request: Request, exc: HTTPException):
-    response = get_request_id(request, exc)
-    return response
+    return build_error_response(request, exc.status_code, exc.detail)
