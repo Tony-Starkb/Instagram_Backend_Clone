@@ -14,6 +14,7 @@ DATA_LOCK = Lock()
 
 USERS_FILE = Path(os.getenv("USERS_FILE_PATH", BASE_DIR / "schemas" / "users.json"))
 POSTS_FILE = Path(os.getenv("POSTS_FILE_PATH", BASE_DIR / "schemas" / "posts.json"))
+REFRESH_TOKEN_FILE = Path(os.getenv("REFRESH_TOKEN_FILE_PATH", BASE_DIR / "schemas" / "refresh_tokens.json"))
 
 
 def _now_iso() -> str:
@@ -249,3 +250,71 @@ def unlike_post(post_id: int, username: str):
             _save_posts(posts)
             return "unliked", posts[index]
     return "missing", None
+
+
+"""
+here we will define the functions to handle the refresh tokens, we will use a json file to store the 
+refresh tokens, each token will have the following fields:
+ - id 
+ - user_id
+ - token 
+ - created_at
+ - is_revoked 
+ - expires_at
+
+"""
+
+def _normalize_refresh_token(token: dict) -> dict:
+    normalized = dict(token)
+    normalized["id"] = str(normalized["id"])
+    normalized["user_id"] = str(normalized["user_id"])
+    normalized["token"] = str(normalized["token"])
+    normalized["created_at"] = normalized.get("created_at") or _now_iso()
+    normalized["is_revoked"] = bool(normalized.get("is_revoked", False))
+    normalized["expires_at"] = normalized.get("expires_at") or _now_iso()
+    return normalized
+
+def _load_refresh_tokens() -> list[dict]:
+    with DATA_LOCK:
+        tokens = [_normalize_refresh_token(token) for token in _read_json(REFRESH_TOKEN_FILE)]
+        _write_json(REFRESH_TOKEN_FILE, tokens)
+        return tokens
+
+
+def _save_refresh_tokens(tokens: list[dict]) -> None:
+    with DATA_LOCK:
+        _write_json(REFRESH_TOKEN_FILE, tokens)
+
+
+def get_refresh_token(token): ## search by token field
+    for token in _load_refresh_tokens():
+        if token["token"] == str(token):
+            return token
+    return None
+
+
+def save_refresh_token(token_data): ## add new record
+    tokens = _load_refresh_tokens()
+    normalized_token = _normalize_refresh_token(token_data)
+    tokens.append(normalized_token)
+    _save_refresh_tokens(tokens)
+    return normalized_token
+
+
+def revoke_refresh_token(token): ## set is_revoked=True
+    tokens = _load_refresh_tokens()
+    for index, item in enumerate(tokens):
+        if item["token"] == str(token):
+            updated_token = dict(item)
+            updated_token["is_revoked"] = True
+            tokens[index] = _normalize_refresh_token(updated_token)
+            _save_refresh_tokens(tokens)
+            return tokens[index]
+    return None
+
+
+def delete_all_user_tokens(user_id): ## breach detection
+    tokens = _load_refresh_tokens()
+    filtered_tokens = [token for token in tokens if token["user_id"] != str(user_id)]
+    _save_refresh_tokens(filtered_tokens)
+    return True

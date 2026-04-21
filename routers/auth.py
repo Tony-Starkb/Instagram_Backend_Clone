@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
-from typing import Annotated
+from typing import Annotated, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, Response, status
+import jwt
+from fastapi import APIRouter, Depends, Response, status, Cookie
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
@@ -58,6 +59,83 @@ def user_login(
     
     return TokenResponse (access_token = accessToken, token_type = "bearer")
 
+
+@auth_router.post("/refresh")
+def renue_refresh_token(
+    response: Response,
+	refresh_token: Optional[str] = Cookie(None),
+) -> TokenResponse:
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    ## raise the error 401 if no cookie of refresh token is found
+    if refresh_token is None:
+        raise credentials_exception ## force login after this
+    
+    
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise credentials_exception
+    except jwt.InvalidTokenError:
+        raise credentials_exception
+    
+    
+    token_in_db = db_handler.get_refresh_token(refresh_token)
+    if not token_in_db:
+        raise credentials_exception ## force login after this
+    
+    if token_in_db.get("is_revoked") == True:
+        db_handler.delete_all_user_tokens(token_in_db["user_id"])
+        raise credentials_exception ## force login after this
+    
+    expires_at = datetime.fromisoformat(token_in_db.get("expires_at"))
+    if expires_at < datetime.now(timezone.utc):
+        raise credentials_exception ## force login after this
+    
+    db_handler.revoke_refresh_token(refresh_token)
+    
+    user = db_handler.get_user_by_id(token_in_db["user_id"])
+    
+    access_token_expire = timedelta(minutes=int(ACCESS_TOKEN_EXPIRE_MINS))
+    accessToken = create_token (
+		payload={"username": user['username'], "role": user['role']},
+		expire_time=access_token_expire
+	)
+    
+    refresh_token_expire = timedelta(days=int(REFRESH_TOKEN_EXPIRE_DAYS))
+    refresh_token = create_token(
+		payload={"username": user['username'], "role": user['role'], "type": "refresh"},
+        expire_time=refresh_token_expire
+	)
+    
+    response.set_cookie(
+		key='refresh_token',
+        value=refresh_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=int(REFRESH_TOKEN_EXPIRE_DAYS) * 24 * 60 * 60
+	)
+    
+    refresh_token_data = {
+    	"id": str(uuid.uuid4()),
+    	"user_id": token_in_db["user_id"],  
+    	"token": refresh_token,
+    	"is_revoked": False,                
+    	"created_at": datetime.now(timezone.utc).isoformat(),
+    	"expires_at": (datetime.now(timezone.utc) + refresh_token_expire).isoformat(),
+	}
+    
+    db_handler.store_refresh_token(refresh_token_data)
+    
+    return TokenResponse (access_token = accessToken, token_type = "bearer")
+    
+    
 
 
 @auth_router.post("/registration")
