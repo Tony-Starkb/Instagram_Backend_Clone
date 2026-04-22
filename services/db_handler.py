@@ -14,7 +14,7 @@ DATA_LOCK = Lock()
 
 USERS_FILE = Path(os.getenv("USERS_FILE_PATH", BASE_DIR / "schemas" / "users.json"))
 POSTS_FILE = Path(os.getenv("POSTS_FILE_PATH", BASE_DIR / "schemas" / "posts.json"))
-REFRESH_TOKEN_FILE = Path(os.getenv("REFRESH_TOKEN_FILE_PATH", BASE_DIR / "schemas" / "refresh_tokens.json"))
+REFRESH_TOKEN_FILE = Path(os.getenv("REFRESH_TOKEN_FILE_PATH", BASE_DIR / "schemas" / "refresh_token.json"))
 
 
 def _now_iso() -> str:
@@ -286,10 +286,10 @@ def _save_refresh_tokens(tokens: list[dict]) -> None:
         _write_json(REFRESH_TOKEN_FILE, tokens)
 
 
-def get_refresh_token(token): ## search by token field
-    for token in _load_refresh_tokens():
-        if token["token"] == str(token):
-            return token
+def get_refresh_token(token: str): ## search by token field
+    for token_record in _load_refresh_tokens():
+        if token_record["token"] == str(token):
+            return token_record
     return None
 
 
