@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -57,6 +58,7 @@ def _normalize_user(user: dict) -> dict:
     normalized["following"] = list(normalized.get("following", []))
     normalized["created_at"] = normalized.get("created_at") or _now_iso()
     normalized["password_hash"] = _hash_legacy_password(str(normalized["password_hash"]))
+    normalized["is_deleted"] = bool(normalized.get("is_deleted", False))
     return normalized
 
 
@@ -68,8 +70,20 @@ LEGACY_POST_USERNAMES = {
 
 def _normalize_post(post: dict) -> dict:
     normalized = dict(post)
-    normalized["id"] = int(normalized["id"])
-    normalized["username"] = LEGACY_POST_USERNAMES.get(normalized.get("username"), normalized.get("username"))
+    normalized["id"] = str(normalized["id"])
+    username = normalized.get("username")
+    if not username and normalized.get("user_id") is not None:
+        matched_user = next(
+            (
+                user
+                for user in _read_json(USERS_FILE)
+                if str(user.get("id")) == str(normalized["user_id"])
+            ),
+            None,
+        )
+        if matched_user is not None:
+            username = matched_user.get("username")
+    normalized["username"] = LEGACY_POST_USERNAMES.get(username, username)
     normalized["caption"] = normalized.get("caption") or ""
     normalized["image_url"] = str(normalized["image_url"])
     normalized["liked_by"] = list(normalized.get("liked_by", []))
@@ -83,7 +97,6 @@ def _normalize_post(post: dict) -> dict:
 def _load_users() -> list[dict]:
     with DATA_LOCK:
         users = [_normalize_user(user) for user in _read_json(USERS_FILE)]
-        _write_json(USERS_FILE, users)
         return users
 
 
@@ -95,7 +108,6 @@ def _save_users(users: list[dict]) -> None:
 def _load_posts() -> list[dict]:
     with DATA_LOCK:
         posts = [_normalize_post(post) for post in _read_json(POSTS_FILE)]
-        _write_json(POSTS_FILE, posts)
         return posts
 
 
@@ -121,26 +133,34 @@ def _public_user(user: dict) -> dict:
     }
 
 
+def _is_active_user(user: dict) -> bool:
+    return not bool(user.get("is_deleted", False))
+
+
+def _active_users() -> list[dict]:
+    return [user for user in _load_users() if _is_active_user(user)]
+
+
 def get_all_users() -> list[dict]:
-    return [_public_user(user) for user in _load_users()]
+    return [_public_user(user) for user in _active_users()]
 
 
 def get_user_by_id(user_id: str):
-    for user in _load_users():
+    for user in _active_users():
         if user["id"] == str(user_id):
             return user
     return None
 
 
 def get_user_by_username(username: str):
-    for user in _load_users():
+    for user in _active_users():
         if user["username"].lower() == username.lower():
             return user
     return None
 
 
 def get_user_by_email(email: str):
-    for user in _load_users():
+    for user in _active_users():
         if user["email"] == str(email).lower():
             return user
     return None
@@ -160,14 +180,35 @@ def get_public_user(username: str):
         return None
     return _public_user(user)
 
+def update_user_role(username: str, new_role: str) -> bool:
+    users = _load_users()
+    for index, user in enumerate(users):
+        if user["username"].lower() == username.lower():
+            updated_user = dict(user)
+            updated_user["role"] = new_role
+            users[index] = _normalize_user(updated_user)
+            _save_users(users)
+            return True
+    return False
+
+def delete_user(username: str) -> bool:
+    users = _load_users()
+    for index, user in enumerate(users):
+        if user["username"].lower() == username.lower():
+            user["is_deleted"] = True
+            users[index] = _normalize_user(user)
+            _save_users(users)
+            return True
+    return False
+
 
 def get_all_posts() -> list[dict]:
     return sorted(_load_posts(), key=lambda item: item["created_at"], reverse=True)
 
 
-def get_post_by_id(post_id: int):
+def get_post_by_id(post_id: str):
     for post in _load_posts():
-        if post["id"] == int(post_id):
+        if post["id"] == post_id:
             return post
     return None
 
@@ -179,11 +220,11 @@ def get_user_posts(username: str) -> list[dict]:
 
 def add_post(post: dict) -> dict:
     posts = _load_posts()
-    next_id = max((item["id"] for item in posts), default=0) + 1
+    new_id = str(uuid.uuid4())
     normalized_post = _normalize_post(
         {
-            "id": next_id,
-            "username": post["username"],
+            "id": new_id,
+            "user_id": post["user_id"],
             "caption": post["caption"],
             "image_url": post["image_url"],
             "like_count": 0,
@@ -198,10 +239,10 @@ def add_post(post: dict) -> dict:
     return normalized_post
 
 
-def update_post(post_id: int, updates: dict):
+def update_post(post_id: str, updates: dict):
     posts = _load_posts()
     for index, post in enumerate(posts):
-        if post["id"] == int(post_id):
+        if post["id"] == post_id:
             updated_post = dict(post)
             updated_post.update({key: value for key, value in updates.items() if value is not None})
             updated_post["updated_at"] = _now_iso()
@@ -211,23 +252,23 @@ def update_post(post_id: int, updates: dict):
     return None
 
 
-def delete_post(post_id: int) -> bool:
+def delete_post(post_id: str) -> bool:
     posts = _load_posts()
-    filtered_posts = [post for post in posts if post["id"] != int(post_id)]
+    filtered_posts = [post for post in posts if post["id"] != post_id]
     if len(filtered_posts) == len(posts):
         return False
     _save_posts(filtered_posts)
     return True
 
 
-def like_post(post_id: int, username: str):
+def like_post(post_id: str, user_id: str):
     posts = _load_posts()
     for index, post in enumerate(posts):
-        if post["id"] == int(post_id):
-            if username in post["liked_by"]:
+        if post["id"] == post_id:
+            if user_id in post["liked_by"]:
                 return "already-liked", post
             updated_post = dict(post)
-            updated_post["liked_by"] = [*post["liked_by"], username]
+            updated_post["liked_by"] = [*post["liked_by"], user_id]
             updated_post["like_count"] = len(updated_post["liked_by"])
             updated_post["updated_at"] = _now_iso()
             posts[index] = _normalize_post(updated_post)
@@ -236,14 +277,14 @@ def like_post(post_id: int, username: str):
     return "missing", None
 
 
-def unlike_post(post_id: int, username: str):
+def unlike_post(post_id: str, user_id: str):
     posts = _load_posts()
     for index, post in enumerate(posts):
         if post["id"] == int(post_id):
-            if username not in post["liked_by"]:
+            if user_id not in post["liked_by"]:
                 return "not-liked", post
             updated_post = dict(post)
-            updated_post["liked_by"] = [item for item in post["liked_by"] if item != username]
+            updated_post["liked_by"] = [item for item in post["liked_by"] if item != user_id]
             updated_post["like_count"] = len(updated_post["liked_by"])
             updated_post["updated_at"] = _now_iso()
             posts[index] = _normalize_post(updated_post)
@@ -277,7 +318,6 @@ def _normalize_refresh_token(token: dict) -> dict:
 def _load_refresh_tokens() -> list[dict]:
     with DATA_LOCK:
         tokens = [_normalize_refresh_token(token) for token in _read_json(REFRESH_TOKEN_FILE)]
-        _write_json(REFRESH_TOKEN_FILE, tokens)
         return tokens
 
 
@@ -297,7 +337,7 @@ def save_refresh_token(token_data): ## add new record
     tokens = _load_refresh_tokens()
     normalized_token = _normalize_refresh_token(token_data)
     tokens.append(normalized_token)
-    _save_refresh_tokens(tokens)
+    _save_refresh_tokens(tokens) 
     return normalized_token
 
 

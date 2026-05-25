@@ -11,10 +11,21 @@ identifying the issues and debugging the application effectively.
 
 import time
 import logging
-from fastapi import Request
+from fastapi import Request, Response
 
 
 logger = logging.getLogger(__name__)
+
+
+## function to get the IP address of client
+async def get_client_ip(request: Request):
+    # Try common headers first
+    x_forwarded_for = request.headers.get("X-Forwarded-For")
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(",")[0]  # First IP is the client
+    else:
+        ip = request.headers.get("X-Real-IP") or request.client.host
+    return {"client_ip": ip}
 
 
 async def log_request(request: Request, call_next):
@@ -34,7 +45,10 @@ async def log_request(request: Request, call_next):
     # Log required information
     method = request.method
     path = request.url.path
+    client_ip = await get_client_ip(request)
     request_id = getattr(request.state, 'request_id', 'unknown')
-    logger.info(f"req_id={request_id} | {method} {path} | {status_code} | {int(duration_ms)}ms")
+    logger.info(f"req_id={request_id} | {client_ip['client_ip']} | {method} {path} | {status_code} | {int(duration_ms)}ms")
     
     return response
+
+

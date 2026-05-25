@@ -1,4 +1,5 @@
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from uuid import UUID
 
 
 class PostCreate(BaseModel):
@@ -16,7 +17,7 @@ class PostUpdate(BaseModel):
 
 
 class PostResponse(BaseModel):
-    id: int
+    id: UUID
     username: str
     caption: str
     image_url: AnyHttpUrl

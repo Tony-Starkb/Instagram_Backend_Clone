@@ -79,7 +79,18 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 	if user is None:
 		raise credentials_exception
 
-	return user
+	return user 
+
+def require_role(required_role: set):
+    def role_checker(user = Depends(get_current_user)):
+        if user["role"] not in required_role:
+            raise HTTPException(
+                status_code=403,
+                detail="Not Allowed"
+            )
+        return user
+    return role_checker
+        
 
 
 # function to create a jwt token based on the payloadwe pass to it

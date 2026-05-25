@@ -35,7 +35,7 @@ def user_login(
     response: Response,
 ) -> TokenResponse:
     authenticated_user = authenticate_user(user.username, user.password)
-    print("USER FROM DB:", authenticated_user['id'], authenticated_user['username'])
+    
         
     access_token_expire = timedelta(minutes=int(ACCESS_TOKEN_EXPIRE_MINS))
     accessToken = create_token (
@@ -92,9 +92,9 @@ def renue_refresh_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
         
-    print("TOKEN FROM COOKIE:", refresh_token)
+    # print("TOKEN FROM COOKIE:", refresh_token)
     token_in_db = db_handler.get_refresh_token(refresh_token)
-    print("TOKEN IN DB:", token_in_db)
+    #  print("TOKEN IN DB:", token_in_db)
     
     
     try:

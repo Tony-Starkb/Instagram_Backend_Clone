@@ -7,9 +7,12 @@ from fastapi.responses import JSONResponse
 from core.exceptions import PostNotFound, UserNotFound, NotAuthorized
 from middleware.logging import log_request
 from middleware.request_id import add_request_id_to_header
+
 from routers.auth import auth_router as login_router
 from routers.posts import posts_router as post_router
 from routers.users import users_router as user_router
+from routers.moderate import moderate_router
+from routers.admin import admin_router
 
 
 logging.basicConfig(
@@ -45,6 +48,7 @@ app.middleware("http")(log_request)
 app.middleware("http")(add_request_id_to_header)
 
 
+
 @app.get("/health")
 def check_health():
 	return JSONResponse({"status": "ok"})
@@ -64,6 +68,8 @@ def version_info():
 app.include_router(post_router)
 app.include_router(user_router)
 app.include_router(login_router)
+app.include_router(moderate_router)
+app.include_router(admin_router)
 
 
 @app.exception_handler(PostNotFound)
