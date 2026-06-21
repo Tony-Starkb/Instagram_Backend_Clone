@@ -1,508 +1,286 @@
-# Instagram Clone — Backend (Month 1)
+# InstaCore
 
-A backend API built with FastAPI, designed to replicate core Instagram functionality. This project is part of a structured backend learning path, built day by day with real-world patterns in mind.
+**A production-style Instagram backend clone built with FastAPI.**
 
----
+InstaCore replicates the core backend systems behind a social media platform — authentication, posts, social graph (follows), likes, and role-based moderation — built with the same architectural patterns used in real production APIs.
 
-## Day 3 — Status Codes & Structured Error Responses
-
-### What I Learned
-
-One of the most important things a backend API does is return **clear, consistent error responses**. This day was focused on understanding HTTP status codes and making sure every error in the API returns a clean JSON response — no HTML pages, no stack traces, nothing that leaks internal details.
-
-Key status codes covered:
-- `200 OK` — successful GET
-- `201 Created` — successful POST
-- `400 Bad Request` — malformed data
-- `401 Unauthorized` — no token or invalid token
-- `403 Forbidden` — valid token but not allowed
-- `404 Not Found` — post or user doesn't exist
-- `409 Conflict` — e.g. liking a post you already liked
-- `422 Unprocessable Entity` — valid JSON but fails validation
-- `500 Internal Server Error` — something broke on the server side
+Not a tutorial project. Every design decision — from composite primary keys to token rotation — was made to solve a specific real-world failure mode, not just to make the demo work.
 
 ---
 
-### What I Built
+## What This Project Demonstrates
 
-#### 1. Custom Exception Classes (`app/core/exceptions.py`)
+- Designing a relational database schema before writing any application code
+- Authentication done properly: password hashing, JWT access/refresh tokens, token rotation with breach detection
+- Two-layer input validation that blocks privilege escalation at the schema level
+- Role-based access control (RBAC) for user / moderator / admin permission tiers
+- Middleware for request tracing and structured logging
+- Database constraints that make invalid states structurally impossible — not just logically unlikely
+- Automated API testing with isolated, disposable test environments
 
-Created three custom exception classes that extend FastAPI's `HTTPException`:
+---
 
-- `PostNotFound(post_id)` — raised when a requested post doesn't exist
-- `UserNotFound(user_id)` — raised when a requested user doesn't exist
-- `NotAuthorized(user_id=None)` — raised when a user tries to do something they're not allowed to. `user_id` is optional because not every 403 is tied to a known user.
+## Core Features
 
-Each class passes the correct `status_code` and a human-readable `detail` message directly to `super().__init__()`.
+### 🔐 Authentication
 
-#### 2. Global Exception Handlers (`main.py`)
+- Registration with bcrypt password hashing (cost factor 12)
+- Login issues a short-lived **access token** (JWT) and a long-lived **refresh token**
+- Refresh token stored in an **HttpOnly cookie** — inaccessible to JavaScript, mitigating XSS
+- **Token rotation**: every refresh invalidates the previous refresh token and issues a new one
+- **Breach detection**: reuse of a revoked refresh token triggers revocation of *all* tokens for that user, forcing full re-authentication
 
-Registered exception handlers so every error — no matter where it's raised — returns the same structured JSON format:
+### 👤 Users & Social Graph
+
+- Public user profile lookup by username
+- Follow / unfollow system with full edge-case handling:
+  - Self-follow attempts blocked (`400`)
+  - Duplicate follow blocked (`409`)
+  - Unfollowing a user you don't follow blocked (`409`)
+- Followers / following list retrieval
+- The `follows` table uses a **composite primary key** (`follower_id`, `following_id`) — duplicate follows are impossible at the database level, not just checked in application code
+
+### 📝 Posts
+
+- Full CRUD: create, read, update, delete
+- Ownership enforcement — users can only edit or delete their own posts (`403` otherwise)
+- Like / unlike system using a composite primary key (`post_id`, `user_id`) on the `post_likes` table — a user cannot like the same post twice, enforced by the schema itself
+- Soft-delete pattern via `is_deleted` flag — preserves referential integrity instead of hard-deleting rows
+
+### 🛡️ Role-Based Access Control (RBAC)
+
+Three roles: `user`, `moderator`, `admin` — enforced through a single reusable dependency:
+
+```python
+Depends(require_role({"admin", "moderator"}))
+```
+
+- **Admin**: change any user's role, ban (delete) any user
+- **Moderator + Admin**: delete any post, view any user's full profile (including private accounts)
+- Adding a new protected route is one line — no repeated permission-checking logic scattered across files
+
+### 📡 Middleware & Observability
+
+- Every request gets a unique `X-Request-ID` — reused from upstream (CDN/gateway) if present, generated fresh otherwise
+- Structured request logging: method, path, status code, duration (using `perf_counter()` for accurate millisecond timing)
+- `request_id` included in every error response — enables tracing a specific failed request through logs instantly
+
+### ⚠️ Structured Error Handling
+
+Every error returns the same consistent format — no stack traces, no internal details leaked:
 
 ```json
 {
   "error": {
     "code": 404,
-    "message": "Post with id 99 not found.",
+    "message": "Post with id 3 not found.",
     "request_id": "a373af91-9aa6-46b2-ae64-4b858719294c"
   }
 }
 ```
 
-Handlers added:
-- `PostNotFound` handler
-- `UserNotFound` handler
-- `NotAuthorized` handler
-- `HTTPException` handler — catches all other HTTP errors
-- `RequestValidationError` handler — catches 422 validation errors (e.g. passing a string where an integer is expected)
-- Generic `Exception` handler — catches unexpected 500 errors, returns a safe generic message with no stack trace
+Custom exception classes (`PostNotFound`, `UserNotFound`, `NotAuthorized`) plus global handlers for validation errors (`422`) and unexpected crashes (`500`, logged internally, never exposed to the client).
 
-#### 3. `request_id` on Every Error
+### 🧪 Input Validation
 
-Every error response includes a unique `request_id` generated with `uuid4()`. This is how real APIs (including Instagram) allow support teams to trace a specific request in logs without exposing internal details to the client.
+Two layers, by design:
 
-#### 4. Raising Exceptions in Routes
+**Layer 1 — Pydantic schemas**
+- `extra="forbid"` on every schema — a request body containing `role="admin"` during registration is rejected with `422`, not silently ignored
+- Response models never include `password_hash` — structurally impossible to leak it
+- Field constraints mirror Instagram's real limits (username max 30 chars, bio max 150, caption max 2200)
 
-Updated the posts router to actually raise `PostNotFound` when a post doesn't exist, instead of returning `null`. This was the missing link that connected the exception classes to the handlers.
+**Layer 2 — Custom validators**
+- Password: minimum 8 characters, requires a letter, number, and special character
+- Username: regex-enforced character set, cannot start/end with special characters
 
----
+### ✅ Automated Tests
 
-### Error Format
+Tests spin up a real server on a random port with isolated, temporary data — no shared state between runs. Coverage includes:
 
-All errors follow this consistent structure:
-
-```json
-{
-  "error": {
-    "code": "<HTTP status code>",
-    "message": "<human readable message>",
-    "request_id": "<uuid4>"
-  }
-}
-```
-
-No HTML. No stack traces. No internal field names exposed to the client.
+- Login success/failure, HttpOnly cookie verification
+- Privilege escalation attempts blocked at the schema level
+- Full post lifecycle: create → update → delete → confirm `404`
+- Like / unlike, including duplicate-action conflict (`409`)
+- Validation errors never leak internal stack traces
 
 ---
 
-### How Instagram Does It
+## Tech Stack
 
-Instagram's error responses look like this:
-```json
-{
-  "message": "Sorry, this media has been deleted.",
-  "error_type": "APINotFoundError",
-  "status": 404
-}
-```
-
-Clean, structured, no internal details. The global exception handler in this project does the same job — it sits between the application and the client, formatting errors consistently before they go out.
+| Layer | Technology |
+|---|---|
+| Framework | FastAPI |
+| Database | PostgreSQL |
+| ORM | SQLAlchemy |
+| Migrations | Alembic |
+| Auth | JWT (PyJWT) + bcrypt |
+| Validation | Pydantic v2 |
+| Testing | Pytest |
 
 ---
 
-### Project Structure (Day 3)
+## Project Structure
 
 ```
-app/
-├── core/
-│   └── exceptions.py       # Custom exception classes
+InstaCore/
+│
+├── main.py                      # App entry point, middleware & exception handler registration
+│
 ├── routers/
-│   └── posts.py            # Post endpoints
+│   ├── auth.py                  # Register, login, refresh, logout
+│   ├── users.py                 # Profiles, follow/unfollow, followers/following
+│   ├── posts.py                 # Post CRUD, like/unlike
+│   ├── admin.py                 # Role management, user banning
+│   └── moderate.py              # Post moderation, profile visibility for mods
+│
 ├── database/
-│   └── posts_model.py      # Post data model
+│   ├── models.py                # SQLAlchemy models (User, Post, Auth, PostLike, UserFollow)
+│   ├── schemas.py                # Pydantic request/response schemas
+│   ├── crud.py                   # Database operations
+│   └── database.py               # Engine & session setup
+│
 ├── services/
-│   └── db_handler.py       # Database operations
-└── main.py                 # App entry point + exception handlers
+│   ├── dependencies.py          # get_current_user, require_role, token creation/validation
+│   └── user_input_validation.py # Password & username validators
+│
+├── middleware/
+│   ├── request_id.py            # X-Request-ID assignment
+│   └── logging.py               # Structured request logging
+│
+├── core/
+│   └── exceptions.py            # Custom exception classes
+│
+├── alembic/                      # Database migrations
+├── docs/
+│   ├── data-model.md             # Full ER diagram, schema design, indexing rationale
+│   ├── erd-diagram.png
+│   └── manual-api-testing.md     # Endpoint test cases
+├── tests/
+│   └── test_api.py               # Automated API test suite
+└── docker-compose.yml             # PostgreSQL container
 ```
 
 ---
 
-### Endpoints Available
+## Database Schema
 
+| Table | Purpose | Key Design Detail |
+|---|---|---|
+| `users` | Account data | Role field for RBAC |
+| `posts` | User posts | Soft-delete via `is_deleted` |
+| `auth_tokens` | Refresh token tracking | Enables revocation & breach detection |
+| `post_likes` | Like records | Composite PK `(post_id, user_id)` — duplicate likes impossible |
+| `follows` | Social graph | Composite PK `(follower_id, following_id)` — duplicate follows impossible, self-referential FK |
+
+Full entity-relationship diagram and indexing rationale documented in [`docs/data-model.md`](./docs/data-model.md).
+
+---
+
+## API Endpoints
+
+### Auth
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/v1/auth/register` | Create account |
+| POST | `/api/v1/auth/login` | Login — returns access token, sets refresh cookie |
+| POST | `/api/v1/auth/refresh` | Rotate refresh token, issue new access token |
+
+### Users
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/v1/users/{username}` | Public profile |
+| GET | `/api/v1/users/{username}/posts` | User's posts |
+| GET | `/api/v1/users/{username}/followers` | Followers list |
+| GET | `/api/v1/users/{username}/following` | Following list |
+| POST | `/api/v1/users/{username}/follow` | Follow a user |
+| DELETE | `/api/v1/users/{username}/follow` | Unfollow a user |
+
+### Posts
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/v1/posts/{id}` | Get post |
+| POST | `/api/v1/posts/` | Create post |
+| PATCH | `/api/v1/posts/{id}` | Update own post |
+| DELETE | `/api/v1/posts/{id}` | Delete own post |
+| POST | `/api/v1/posts/{id}/like` | Like post |
+| DELETE | `/api/v1/posts/{id}/like` | Unlike post |
+
+### Admin / Moderation
+| Method | Endpoint | Description | Required Role |
+|---|---|---|---|
+| PUT | `/api/v1/admin/users/{user_id}/role` | Change user role | admin |
+| DELETE | `/api/v1/admin/users/{user_id}` | Ban user | admin |
+| DELETE | `/api/v1/moderate/posts/{id}` | Delete any post | admin, moderator |
+| GET | `/api/v1/moderate/{user_id}` | View any profile | admin, moderator |
+
+### System
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/health` | Health check |
 | GET | `/api/v1` | API version info |
-| GET | `/api/v1/posts` | Get all posts |
-| GET | `/api/v1/posts/{id}` | Get post by ID |
-| POST | `/api/v1/posts` | Create a new post |
-| PATCH | `/api/v1/posts/{id}` | Update a post |
-| DELETE | `/api/v1/posts/{id}` | Delete a post |
 
 ---
 
-### Tests Done Manually
+## Setup
 
-| Scenario | Expected | Result |
-|---|---|---|
-| `GET /api/v1/posts/999` (non-existent) | 404 JSON | ✅ |
-| `GET /api/v1/posts/abc` (invalid type) | 422 JSON | ✅ |
-| `GET /api/v1/test-500` (forced crash) | 500 JSON, no stack trace | ✅ |
+### 1. Install dependencies
 
----
-
-### Key Takeaways
-
-- Never return `null` from a route — always raise the right exception
-- Never expose stack traces or internal field names to clients
-- A `request_id` on every error makes debugging possible without leaking internals
-- `RequestValidationError` and `HTTPException` are different — you need separate handlers for both
-- `if user_id is not None` is safer than `if user_id` even when your IDs can't be zero — it makes intent explicit
-
----
-
-*Built as part of a structured backend learning path — Month 1, Day 3.*
-
----
-
-## Day 5 — Request Lifecycle + Middleware
-
-### What Was Built Today
-
-### Project Structure
-```
-app/
-├── middleware/
-│   ├── __init__.py
-│   ├── request_id.py       ← generates unique ID for every request
-│   └── logging.py          ← logs every request with timing
-├── dependencies/
-│   └── auth.py             ← get_current_user() stub
-└── main.py                 ← registers middleware + exception handlers
+```bash
+pip install -r requirements.txt
 ```
 
----
+### 2. Start PostgreSQL
 
-### Middleware 1 — `middleware/request_id.py`
-
-Generates a unique `X-Request-ID` for every incoming request and attaches it to the response header.
-
-**Key behaviour:**
-- If the incoming request already has an `X-Request-ID` (e.g. from CDN or API Gateway), it reuses that ID — preserving the trace chain
-- If no ID exists, it generates a new `uuid4()`
-- Stores the ID in `request.state.request_id` so all other middleware and route handlers can access it
-
-**Why this matters at Instagram scale:**
-Every request that flows through CDN → API Gateway → Auth → your server needs a single traceable ID. Without it, engineers cannot find a specific failed request among billions of daily logs.
-
----
-
-### Middleware 2 — `middleware/logging.py`
-
-Logs every request with method, path, status code, and duration.
-
-**Log format:**
-```
-2026-04-09 09:39:58 | INFO | req_id=a71807de-7ca6-4ef7-8a09-91f7d69e4569 | GET /api/v1/posts | 200 | 45ms
+```bash
+docker-compose up -d
 ```
 
-**Key behaviour:**
-- Timer starts **before** `call_next` — captures full request duration
-- Timer stops **after** `call_next` — status code and duration now available
-- Reads `request_id` safely using `getattr(request.state, 'request_id', 'unknown')` — won't crash even if request_id middleware didn't run
-- Logs to `app.log` file
+### 3. Configure environment variables
 
-**Why `perf_counter()` over `time.time()`:**
-`perf_counter()` is a high-resolution timer designed for measuring short durations. `time.time()` can drift or have low resolution depending on the OS — not suitable for measuring millisecond-level endpoint performance.
+Copy `.env.example` to `.env` and fill in:
 
----
-
-### Middleware Registration Order — `main.py`
-
-FastAPI executes middleware in **reverse registration order**. So to run `request_id` first and `logging` second:
-
-```python
-# Register logging first (runs second)
-app.middleware("http")(log_request)
-
-# Register request_id second (runs first)
-app.middleware("http")(add_request_id_to_header)
+```
+DATABASE_URL=postgresql://user:password@localhost:5432/instacore
+SECRET_KEY=your_secret_key
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINS=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+COOKIE_SECURE=false
 ```
 
-**Execution flow:**
+### 4. Run database migrations
+
+```bash
+alembic upgrade head
 ```
-Incoming Request
-      ↓
-add_request_id_to_header   ← assigns request_id
-      ↓
-log_request                ← reads request_id, starts timer
-      ↓
-Route Handler
-      ↓
-log_request                ← stops timer, logs everything
-      ↓
-add_request_id_to_header   ← attaches X-Request-ID to response header
-      ↓
-Outgoing Response
+
+### 5. Run the server
+
+```bash
+uvicorn main:app --reload
+```
+
+API available at `http://127.0.0.1:8000` — interactive docs at `/docs`
+
+### 6. Run tests
+
+```bash
+pytest tests/
 ```
 
 ---
 
-### Dependency Stub — `dependencies/auth.py`
+## Design Notes
 
-A placeholder `get_current_user()` function using FastAPI's `Depends()` system.
+A few decisions worth calling out, since they reflect *why* the project is structured this way:
 
-**Returns a dummy user for now:**
-```python
-{
-    "user_id": "test_user_id",
-    "username": "test_user"
-}
-```
-
-Returns a plain dictionary — not a `JSONResponse`. The route handler is responsible for building the response, not the dependency function.
-
-**Will be replaced later** with real JWT token validation and database lookup.
+- **Composite primary keys over application-level checks** — for likes and follows, uniqueness is guaranteed by the database schema itself, not by an `if exists` check that could theoretically race under concurrent requests.
+- **`extra="forbid"` on every Pydantic schema** — without this, a request body with an unexpected `role` field could silently succeed and grant elevated permissions. Forbidding extra fields closes that door at the validation layer, before it ever reaches business logic.
+- **Refresh token rotation with breach detection** — a stolen refresh token is more dangerous than a stolen access token because it lasts 7 days instead of 30 minutes. Detecting reuse of an already-rotated token and wiping all sessions limits the blast radius of a leaked token.
 
 ---
 
-### Exception Handling — `main.py`
+## Status
 
-All exception handlers include `request_id` in the error response so clients can report it and engineers can trace it in logs.
-
-**Helper function to avoid repetition:**
-```python
-def get_request_id(request):
-    return getattr(request.state, 'request_id', 'unknown')
-```
-
-**Handled exceptions:**
-| Exception | Status Code |
-|-----------|-------------|
-| `PostNotFound` | 404 |
-| `UserNotFound` | 404 |
-| `NotAuthorized` | 401/403 |
-| `HTTPException` | varies |
-| `RequestValidationError` | 422 |
-| `Exception` (generic) | 500 |
-
----
-
-### Key Concepts Learned
-
-**Middleware execution flow:**
-```
-Request → [Middleware] → Route Handler → [Middleware] → Response
-```
-
-**Instagram's real middleware stack at API Gateway:**
-1. TLS termination
-2. DDoS protection
-3. Auth token validation
-4. Rate limiting
-5. Request routing
-
-Today's middleware simulates layers 4 and 5 at a small scale.
-
-**Why `@app.middleware("http")` over `BaseHTTPMiddleware`:**
-`BaseHTTPMiddleware` has known performance issues under load and does not work well with background tasks. The `@app.middleware("http")` decorator is preferred in production FastAPI applications.
-
-**P50 / P95 / P99 latency:**
-Instagram tracks what percentage of requests complete within a given time. If P99 for an endpoint is too high, engineers investigate and optimize that specific endpoint.
-
-**Correlation IDs:**
-Every request gets a unique ID that appears in every log line. When a user reports a problem, engineers search logs by that ID and trace the exact failure point across all microservices instantly.
-
----
-
-### Logging Configuration
-
-Configured in `main.py` — not inside individual middleware files:
-
-```python
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    filename="app.log"
-)
-```
-
----
-
-### Day Deliverable
-
-Every request is now:
-- Assigned a unique `X-Request-ID`
-- Logged with method, path, status code, and duration
-- Traceable across the entire application via `request.state.request_id`
-- Included in every error response for client-side reporting
-
----
-
-*Built as part of a structured backend learning path — Month 1, Day 5.*
-
----
-
-## Day 6 — Instagram Data Model (Design Before You Code)
-
-No code today. This day was entirely focused on database design — thinking through entities, relationships, constraints, and indexes before writing a single line of Python.
-
----
-
-### What I Learned
-
-**Entity design** — breaking Instagram's core features down into 5 tables: Users, Posts, Follows, Likes, Comments.
-
-**Relationship thinking** — asking "can one row on the left have many matching rows on the right?" in both directions to derive every relationship:
-- Users → Posts: one-to-many (one user, many posts)
-- Users → Follows → Users: many-to-many self-referential (a user follows many, is followed by many)
-- Users → Likes → Posts: many-to-many join table
-- Users → Comments → Posts: many-to-many with extra data (content field)
-
-**Constraint thinking** — understanding why constraints live in the database, not just in application code. Even if API validation fails, the DB rejects bad data.
-
-**Index thinking** — indexes are only useful on columns that appear in WHERE clauses of frequent queries. Adding indexes everywhere slows down writes for no benefit.
-
-**Denormalization** — `like_count` and `comment_count` are stored directly on the posts table instead of being computed with `COUNT()` on every read. This is how Instagram handles billions of reads efficiently.
-
-**Soft deletes** — posts are never truly deleted. `status` is set to `archived` or `deleted` so data can be restored and referential integrity is preserved.
-
----
-
-### Data Model
-
-#### ERD Diagram
-
-![ERD Diagram](./erd-diagram.png)
-
----
-
-#### Schema
-
-```dbml
-enum post_status {
-  active
-  archived
-  deleted
-}
-
-Table users {
-  id uuid [primary key]
-  email varchar [unique]
-  username varchar(30) [unique]
-  password_hash varchar
-  full_name varchar
-  bio varchar(150)
-  avatar_url varchar(3000)
-  is_private bool
-  is_verified bool
-  created_at timestamp
-
-  indexes {
-    email [name: 'idx_users_email']
-    username [name: 'idx_users_username']
-  }
-}
-
-Table posts {
-  id uuid [primary key]
-  caption varchar(2200)
-  image_url varchar(3000)
-  user_id uuid [not null]
-  status post_status
-  like_count integer
-  comment_count integer
-  created_at timestamp
-
-  indexes {
-    user_id [name: 'idx_posts_user_id']
-  }
-}
-
-Table follows {
-  following_user_id uuid [not null]
-  followed_user_id uuid [not null]
-  created_at timestamp
-
-  indexes {
-    (following_user_id, followed_user_id) [pk]
-  }
-}
-
-Table likes {
-  user_id uuid [not null]
-  post_id uuid [not null]
-  created_at timestamp
-
-  indexes {
-    (user_id, post_id) [pk]
-  }
-}
-
-Table comments {
-  id uuid [primary key]
-  user_id uuid [not null]
-  post_id uuid [not null]
-  content varchar
-  created_at timestamp
-}
-```
-
----
-
-### 5 Key Queries
-
-#### 1. Login Lookup
-```sql
--- find a user by their email
--- uses index: idx_users_email
-SELECT * FROM users
-WHERE email = 'email that we pass';
-```
-
-#### 2. Get User Profile
-```sql
--- fetch a user's details by username
--- uses index: idx_users_username
-SELECT * FROM users
-WHERE username = 'required username';
-```
-
-#### 3. Get User's Posts
-```sql
--- fetch all posts by a specific user
--- uses index: idx_posts_user_id
-SELECT * FROM posts
-WHERE user_id = (SELECT id FROM users WHERE username = 'required username');
-```
-
-#### 4. Get Feed
-```sql
--- fetch posts from everyone a user follows, newest first
-SELECT * FROM posts
-WHERE user_id IN (
-    SELECT followed_user_id FROM follows
-    WHERE following_user_id = 'my user id'
-)
-ORDER BY created_at DESC;
-```
-
-#### 5. Check if Already Liked
-```sql
--- check if a user has already liked a specific post
--- returns a row if liked, empty if not
-SELECT * FROM likes
-WHERE user_id = 'my user id'
-AND post_id = 'the post id';
-```
-
----
-
-### Key Takeaways
-
-- Design the database before writing any code — mistakes here are expensive to fix later
-- Composite primary keys work only when the combination is guaranteed to never repeat
-- `SELECT *` works for learning but never use it in production — you risk exposing `password_hash` to the frontend
-- The `follows` table is self-referential — both foreign keys point back to the same `users` table
-- Comments need their own `id` because the same user can comment multiple times on the same post — unlike likes where `(user_id, post_id)` is always unique
-
----
-
-### Deliverable
-
-`docs/data-model.md` — full ER diagram with all entities, fields, types, constraints, indexes, and 5 key queries documented.
-
----
-
-*Built as part of a structured backend learning path — Month 1, Day 6.*
+Actively under development. Auth, posts, social graph, and RBAC are functional and tested. Comments and a feed endpoint are planned next.

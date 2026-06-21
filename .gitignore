@@ -10,3 +10,6 @@ refresh_token.json
 permission.json
 role_permission.json
 roles.json
+docker-compose.yml
+alembic.ini
+alembic

@@ -8,7 +8,10 @@ import jwt
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
 import bcrypt
-from services import db_handler
+from sqlalchemy.orm import Session
+
+from database.database import SessionLocal
+from database.crud import get_user_by_username, get_user_by_email
 
 
 
@@ -38,26 +41,34 @@ def validate_password_hash(userpassword: str, passwordhash: str):
 	)
  
  
-def authenticate_user(username: str, password: str):
-    user = db_handler.get_user_by_username(username) or db_handler.get_user_by_email(username)
-     
+def get_db():
+    db: Session = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def authenticate_user(username: str, password: str, db: Session):
+    user = get_user_by_username(db, username) or get_user_by_email(db, username)
+
     if user is None:
-         raise HTTPException (
-            status_code = 401,
-            detail = "Invalid username or password"
-		 )
-    
-    if not validate_password_hash(password, user['password_hash']):
-        raise HTTPException (
-			status_code = 401,
-            detail = "Invalid username or password"
-		)
-    
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+        )
+
+    if not validate_password_hash(password, user.password_hash):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+        )
+
     return user
 
 
 # get_current_user: function to return the details about the user that is trying to login the application
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
 
 	credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -75,7 +86,7 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 	except jwt.InvalidTokenError:
 		raise credentials_exception
 
-	user = db_handler.get_user_by_username(token_data.username)
+	user = get_user_by_username(db, token_data.username)
 	if user is None:
 		raise credentials_exception
 
@@ -83,11 +94,8 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 
 def require_role(required_role: set):
     def role_checker(user = Depends(get_current_user)):
-        if user["role"] not in required_role:
-            raise HTTPException(
-                status_code=403,
-                detail="Not Allowed"
-            )
+        if user.role not in required_role:
+            raise HTTPException(status_code=403, detail="Not Allowed")
         return user
     return role_checker
         

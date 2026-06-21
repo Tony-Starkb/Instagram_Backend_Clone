@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 
-from services import db_handler
-from schemas.user import UserPublicResponse
+from database.crud import get_post_by_id, delete_post, get_user_by_id
+from database.schemas import UserPublicResponse
 from core.exceptions import PostNotFound
 from services.dependencies import get_current_user, require_role
+from services.dependencies import get_db
+from sqlalchemy.orm import Session
 
 
 moderate_router = APIRouter(prefix="/api/v1/moderate", tags=["Moderator/Admin"])
@@ -18,15 +20,16 @@ moderate_router = APIRouter(prefix="/api/v1/moderate", tags=["Moderator/Admin"])
     status_code=status.HTTP_204_NO_CONTENT
 )
 def moderator_delete_post(
-    id: int,
-    current_user: dict = Depends(require_role({"admin", "moderator"}))
+    id: str,
+    current_user: dict = Depends(require_role({"admin", "moderator"})),
+    db: Session = Depends(get_db)
 ):
-    post = db_handler.get_post_by_id(id)
+    post = get_post_by_id(db, id)
     
     if post is None:
         raise PostNotFound(id)
     
-    if not db_handler.delete_post(id):
+    if not delete_post(db, id):
         raise PostNotFound(id)
     
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -36,14 +39,15 @@ def moderator_delete_post(
 # normal user the ability to choose wether it account should be private or public
 # and the admin and the moderator can see both type of accounts
 @moderate_router.get(
-    "/{username}",
+    "/{user_id}",
     status_code=status.HTTP_200_OK
 )
 def moderate_get_user_profile(
-    username: str,
-    current_user: dict = Depends(require_role({"admin", "moderator"}))
+    user_id: str,
+    current_user: dict = Depends(require_role({"admin", "moderator"})),
+    db: Session = Depends(get_db)
 ):
-    user = db_handler.get_public_user(username)
+    user = get_user_by_id(db, user_id)
     
     if user is None:
         raise HTTPException(
@@ -51,5 +55,5 @@ def moderate_get_user_profile(
             detail="User not found"
         )
     
-    return UserPublicResponse(**user)
+    return UserPublicResponse.model_validate(user)
         
