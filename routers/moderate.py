@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 
-from database.crud import get_post_by_id, delete_post, get_user_by_id
+from database.crud import get_post_by_id, delete_post, get_user_by_id, delete_comment_on_post
 from database.schemas import UserPublicResponse
 from core.exceptions import PostNotFound
 from services.dependencies import get_current_user, require_role
@@ -57,3 +57,28 @@ def moderate_get_user_profile(
     
     return UserPublicResponse.model_validate(user)
         
+        
+        
+@moderate_router.delete(
+    "/posts/{id}/comments/{comment_id}",
+    status_code=status.HTTP_204_NO_CONTENT
+)
+def moderator_delete_comment(
+    id: str,
+    comment_id: str,
+    current_user: dict = Depends(require_role({"admin", "moderator"})),
+    db: Session = Depends(get_db)
+):
+    post = get_post_by_id(db, id)
+    
+    if post is None:
+        raise PostNotFound(id)
+    
+    if not delete_comment_on_post(db, id, comment_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Comment not found"
+        )
+    
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    

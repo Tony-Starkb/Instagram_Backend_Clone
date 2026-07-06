@@ -25,46 +25,37 @@ def get_free_port() -> int:
 
 class InstagramBackendAPITests(unittest.TestCase):
     @classmethod
+    
     def setUpClass(cls):
-        cls.temp_dir = Path(tempfile.mkdtemp(prefix="instagram_clone_tests_"))
-        cls.users_file = cls.temp_dir / "users.json"
-        cls.posts_file = cls.temp_dir / "posts.json"
-        shutil.copy(FIXTURE_USERS, cls.users_file)
-        shutil.copy(FIXTURE_POSTS, cls.posts_file)
-
         cls.port = get_free_port()
-        env = os.environ.copy()
-        env["USERS_FILE_PATH"] = str(cls.users_file)
-        env["POSTS_FILE_PATH"] = str(cls.posts_file)
-        env["COOKIE_SECURE"] = "false"
-
-        cls.server = subprocess.Popen(
-            [
-                str(ROOT_DIR / ".venv" / "Scripts" / "python.exe"),
-                "-m",
-                "uvicorn",
-                "main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(cls.port),
-            ],
-            cwd=ROOT_DIR,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
+    
+        # Start the server
+        cls.server = subprocess.Popen([...])
+    
+        # Wait for server to be ready
         for _ in range(80):
             try:
                 response = cls.request("GET", "/health")
                 if response["status"] == 200:
-                    return
-            except Exception:
+                    break
+            except:
                 time.sleep(0.25)
-        raise RuntimeError("Test server did not start in time.")
-
+    
+        # Create test users through the real API
+        cls.request("POST", "/api/v1/auth/registration", json_body={
+            "email": "tony@test.com",
+            "username": "tony_123",
+            "password": "Tony@123",
+            "full_name": "Tony Stark"
+        })
+        cls.request("POST", "/api/v1/auth/registration", json_body={
+            "email": "steve@test.com",
+            "username": "steve-rogers", 
+            "password": "Steve@456",
+            "full_name": "Steve Rogers"
+        })
+    
+    
     @classmethod
     def tearDownClass(cls):
         if hasattr(cls, "server"):

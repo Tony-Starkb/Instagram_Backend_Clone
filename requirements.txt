@@ -10,3 +10,4 @@ SQLAlchemy==2.0.30
 psycopg2-binary==2.9.9
 python-multipart==0.0.9
 pytest==8.3.2
+alembic==1.13.1

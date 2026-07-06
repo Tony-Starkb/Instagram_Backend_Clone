@@ -86,6 +86,6 @@ def unfollow_user(
 	status_name, user = unfollow_a_user(db, username, current_user.id)
 	if status_name == "missing":
 		raise UserNotFound(username)
-	if status_name == "not-following":
+	if status_name == "not-followed":
 		raise HTTPException(status_code=409, detail="You have not followed this user.")
 	return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -61,7 +61,6 @@ class Post(Base):
     username: Mapped[str] = mapped_column(String(50), nullable=False)
     caption: Mapped[str] = mapped_column(Text, nullable=False)
     image_url: Mapped[str] = mapped_column(String, nullable=False)
-    liked_by: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     like_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     comment_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -97,3 +96,13 @@ class UserFollow(Base):
     follower_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     following_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+    
+class PostComment(Base):
+    __tablename__ = "post_comments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    post_id: Mapped[str] = mapped_column(String, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    comment: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
